@@ -9,6 +9,7 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.location.LocationManager;
+import android.net.nsd.NsdManager;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
@@ -17,6 +18,7 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.text.method.ScrollingMovementMethod;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
@@ -149,7 +151,9 @@ public class MainActivity extends Activity {
                     .putString(SERVER_ADDRESS, serverAddress)
                     .putString(SERVER_PORT, serverPort)
                     .apply();
-            gpsdServiceTask = new StartGpsdServiceTask(this);
+
+
+            gpsdServiceTask = new StartGpsdServiceTask(this, message -> runOnUiThread(() -> print(message)));
             gpsdServiceTask.execute(serverAddress, serverPort);
             startStopButton.setEnabled(false);
         } else {
@@ -159,16 +163,41 @@ public class MainActivity extends Activity {
     }
 
     private static class StartGpsdServiceTask extends AsyncTask<String, Void, String> {
+        private static final String TAG = "StartGpsdServiceTask";
+        private static final String MDNS_SERVICE_TYPE = "_gpsd._udp.";
+
         private WeakReference<MainActivity> activityRef;
+        private LoggingCallback loggingCallback;
         private int port;
 
-        StartGpsdServiceTask(MainActivity activity) {
+        StartGpsdServiceTask(MainActivity activity, LoggingCallback loggingCallback ) {
+            this.loggingCallback = loggingCallback;
             activityRef = new WeakReference<>(activity);
         }
 
         @Override
         protected String doInBackground(String... host) {
+            MainActivity activity = activityRef.get();
+
+            if (activity == null)
+                return host[0];
+
             port = Integer.parseInt(host[1]);
+
+            if(host[0].endsWith(".local")) {
+                GpsdMulticastDnsResolver resolver = new GpsdMulticastDnsResolver(
+                        (NsdManager)activity.getSystemService(NSD_SERVICE), MDNS_SERVICE_TYPE, host[0]
+                );
+                resolver.setLoggingCallback(loggingCallback);
+
+                String result = resolver.resolve();
+                //loggingCallback.log(result);
+
+                if(result != null) {
+                    return result;
+                }
+            }
+
             try {
                 return InetAddress.getByName(host[0]).getHostAddress();
             } catch (UnknownHostException e) {
@@ -193,6 +222,7 @@ public class MainActivity extends Activity {
             if (activity == null)
                 return;
             Intent intent = new Intent(activity, GpsdForwarderService.class);
+
             intent.putExtra(GpsdForwarderService.GPSD_SERVER_ADDRESS, address)
                     .putExtra(GpsdForwarderService.GPSD_SERVER_PORT, port);
             activity.print("Streaming to " + address + ":" + port);
@@ -212,6 +242,13 @@ public class MainActivity extends Activity {
             activity.startStopButton.setEnabled(true);
             activity.gpsdServiceTask = null;
         }
+
+        private void log(String message) {
+            Log.i(TAG, message);
+            if (loggingCallback != null)
+                loggingCallback.log(message);
+        }
+
     }
 
     private void stopGpsdService() {

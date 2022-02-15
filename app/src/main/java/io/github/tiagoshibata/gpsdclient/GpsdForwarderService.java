@@ -7,6 +7,8 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.location.LocationManager;
+import android.net.nsd.NsdManager;
+import android.net.nsd.NsdServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -54,12 +56,15 @@ public class GpsdForwarderService extends Service implements LoggingCallback, On
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GPSdClient:GPSdStreaming");
         wakeLock.acquire();
+
+
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         super.onStartCommand(intent, flags, startId);
         String serverAddress = intent.getStringExtra(GPSD_SERVER_ADDRESS);
+
         int serverPort = intent.getIntExtra(GPSD_SERVER_PORT, -1);
         if (serverAddress == null || serverPort <= 0)
             throw new RuntimeException(
@@ -76,12 +81,9 @@ public class GpsdForwarderService extends Service implements LoggingCallback, On
         startForeground(NOTIFICATION_ID, builder.build());
         if (sensorStream != null)
             sensorStream.stop();
-        // Note: GPSD_SERVER_ADDRESS must in a resolved form.
-        // An exception will be thrown if a hostname is given, since the service's main thread is
-        // the UI thread when sharing the process between the activity and the service, and
-        // networking on the UI thread is forbidden. See:
-        // https://developer.android.com/reference/android/app/Service.html#onStartCommand(android.content.Intent, int, int)
+
         InetSocketAddress server = new InetSocketAddress(serverAddress, serverPort);
+
         try {
             sensorStream = new UdpSensorStream(server);
         } catch (SocketException e) {
